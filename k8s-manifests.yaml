@@ -1,0 +1,194 @@
+# =========================
+# PostgreSQL Persistent Volume Claim
+# =========================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-initdb-config
+  labels:
+    app: postgres
+    tier: database
+    environment: dev
+    managed-by: k8s-manifests
+    part-of: personal-finance-tracker
+    version: v1
+    component: initdb
+    owner: vedant
+    team: devops
+    project: personal-finance-tracker
+    description: "Database schema and initial data for finance tracker"
+data:
+  init-db.sql: |
+    -- users table
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100)
+    );
+
+    -- categories table
+    CREATE TABLE IF NOT EXISTS categories (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) UNIQUE
+    );
+
+    -- transactions table
+    CREATE TABLE IF NOT EXISTS transactions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        category_id INTEGER REFERENCES categories(id),
+        amount NUMERIC(12,2) NOT NULL,
+        currency VARCHAR(10) NOT NULL,
+        timestamp DATE NOT NULL
+    );
+
+    -- Insert a default user for testing
+    INSERT INTO users (id, name) VALUES (1, 'Demo User') ON CONFLICT DO NOTHING;
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  ports:
+    - port: 5432
+  selector:
+    app: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  selector:
+    matchLabels:
+      app: postgres
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "financedb"
+            - name: POSTGRES_USER
+              value: "financeuser"
+            - name: POSTGRES_PASSWORD
+              value: "password123"
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: postgres-storage
+            - mountPath: /docker-entrypoint-initdb.d
+              name: initdb
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+        - name: initdb
+          configMap:
+            name: postgres-initdb-config
+
+# =========================
+# Backend Deployment
+# =========================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+spec:
+  ports:
+    - port: 5000
+      targetPort: 5000
+  selector:
+    app: backend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: ved06/project_backend:v1.0
+          ports:
+            - containerPort: 5000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "5000"
+            - name: PGHOST
+              value: "postgres"
+            - name: PGUSER
+              value: "financeuser"
+            - name: PGPASSWORD
+              value: "password123"
+            - name: PGDATABASE
+              value: "financedb"
+            - name: PGPORT
+              value: "5432"
+
+# =========================
+# Frontend Deployment
+# =========================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30080  # You can access via <NodeIP>:30080
+  selector:
+    app: frontend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ved06/project_frontend:v1.0
+          ports:
+            - containerPort: 80 
