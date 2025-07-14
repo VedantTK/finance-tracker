@@ -28,7 +28,6 @@ metadata:
     owner: vedant
     team: devops
     project: personal-finance-tracker
-    description: "Database schema and initial data for finance tracker"
 data:
   init-db.sql: |
     -- users table
